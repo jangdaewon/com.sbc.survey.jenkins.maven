@@ -1,48 +1,24 @@
-@Library('retort-lib') _
-def label = "jenkins-${UUID.randomUUID().toString()}"
+node {
+    def server = Artifactory.newServer url: SERVER_URL, credentialsId: CREDENTIALS
+    def rtMaven = Artifactory.newMavenBuild()
+    def buildInfo
 
-def ZCP_USERID='zcpsample'
-def DOCKER_IMAGE='zcpsample/sam-springboot'
-def K8S_NAMESPACE='default'
+    stage ('Clone') {
+        git url: 'https://github.com/jangdaewon/com.sbc.survey.jenkins.maven.git'
+    }
 
-timestamps {
-    podTemplate(label:label,
-        serviceAccount: "zcp-system-sa-${ZCP_USERID}",
-        containers: [
-            containerTemplate(name: 'maven', image: 'maven:3.5.2-jdk-8-alpine', ttyEnabled: true, command: 'cat'),
-            containerTemplate(name: 'docker', image: 'docker:17-dind', ttyEnabled: true, command: 'dockerd-entrypoint.sh', privileged: true),
-            containerTemplate(name: 'kubectl', image: 'lachlanevenson/k8s-kubectl:v1.13.6', ttyEnabled: true, command: 'cat')
-        ],
-        volumes: [
-            persistentVolumeClaim(mountPath: '/root/.m2', claimName: 'zcp-jenkins-mvn-repo')
-        ]) {
-    
-        node(label) {
-            stage('SOURCE CHECKOUT') {
-                def repo = checkout scm
-            }
-    
-            stage('BUILD') {
-                container('maven') {
-                    mavenBuild goal: 'clean package', systemProperties:['maven.repo.local':"/root/.m2/${JOB_NAME}"]
-                }
-            }
-    
-            stage('BUILD DOCKER IMAGE') {
-                container('docker') {
-                    dockerCmd.build tag: "${HARBOR_REGISTRY}/${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                    dockerCmd.push registry: HARBOR_REGISTRY, imageName: DOCKER_IMAGE, imageVersion: BUILD_NUMBER, credentialsId: "HARBOR_CREDENTIALS"
-                }
-            }
-    
-            stage('DEPLOY') {
-                container('kubectl') {
-                    kubeCmd.apply file: 'k8s/service.yaml', namespace: K8S_NAMESPACE
-                    yaml.update file: 'k8s/deploy.yaml', update: ['.spec.template.spec.containers[0].image': "${HARBOR_REGISTRY}/${DOCKER_IMAGE}:${BUILD_NUMBER}"]
-    
-                    kubeCmd.apply file: 'k8s/deploy.yaml', wait: 300, recoverOnFail: false, namespace: K8S_NAMESPACE
-                }
-            }
-        }
+    stage ('Artifactory configuration') {
+        rtMaven.tool = MAVEN_TOOL // Tool name from Jenkins configuration
+        rtMaven.deployer releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local', server: server
+        rtMaven.resolver releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot', server: server
+        buildInfo = Artifactory.newBuildInfo()
+    }
+
+    stage ('Exec Maven') {
+        rtMaven.run pom: 'pom.xml', goals: 'clean install', buildInfo: buildInfo
+    }
+
+    stage ('Publish build info') {
+        server.publishBuildInfo buildInfo
     }
 }
