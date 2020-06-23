@@ -1,24 +1,14 @@
 node {
-//    def server = Artifactory.newServer url: SERVER_URL, credentialsId: CREDENTIALS
-    def rtMaven = Artifactory.newMavenBuild()
-    def buildInfo
-
-    stage ('Clone') {
-        git url: 'https://github.com/jangdaewon/com.sbc.survey.jenkins.maven.git'
-    }
-
-    stage ('Artifactory configuration') {
-        rtMaven.tool = 'maven' // Tool name from Jenkins configuration
-//        rtMaven.deployer releaseRepo: 'libs-release-local', snapshotRepo: 'libs-snapshot-local', server: server
-//        rtMaven.resolver releaseRepo: 'libs-release', snapshotRepo: 'libs-snapshot', server: server
-        buildInfo = Artifactory.newBuildInfo()
-    }
-
-    stage ('Exec Maven') {
-        rtMaven.run pom: 'pom.xml', goals: 'clean install', buildInfo: buildInfo
-    }
-
-    stage ('Publish build info') {
-//        server.publishBuildInfo buildInfo
-    }
+  stage('Parallel-test') {
+      parallel 'Build-test-1' : {
+          build job : 'Build-test-1'
+      } , 'Build-test-2' : {
+          build job : 'Build-test-2'
+      } , 'Build-test-3' : {
+          build job : 'Build-test-3'
+      }
+  }
+  stage('Build-test-4') {
+     build job : 'Build-test-4'
+  }
 }
